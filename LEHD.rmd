@@ -1,0 +1,171 @@
+
+## Load Packages
+
+```{r}
+options(scipen=999)
+library(haven)
+library(dplyr)
+library(tidycensus)
+library(janitor)
+library(purrr)
+library(lehdr)
+library(sf)
+library(tigris)
+library(ggplot2)
+library(scales)
+library(tidyr) 
+```
+
+## Download Work Area Characteristics Data for Texas for each census tract
+
+```{r}
+wac  <- grab_lodes(state = "tx", 
+                    year = c(2002, 2012, 2022), 
+                    version = "LODES8", 
+                    lodes_type = "wac", 
+                    job_type = "JT00",
+                    segment = "S000", 
+                    state_part = "main", 
+                    agg_geo = "tract")
+
+tail(wac)  
+```
+
+# List the industries of interest by ID
+
+```{r}
+industryvars <- c("C000",  # Total jobs
+                   "CNS01", # Agriculture, Forestry, Fishing and Hunting
+                   "CNS02", # Mining, Quarrying, and Oil and Gas Extraction
+                   "CNS03", # Utilities
+                   "CNS04", # Construction
+                   "CNS05", # Manufacturing
+                   "CNS06", # Wholesale Trade
+                   "CNS07", # Retail Trade
+                   "CNS08", # Transportation and Warehousing
+                   "CNS09", # Information
+                   "CNS10", # Finance and Insurance
+                   "CNS11", # Real Estate and Rental and Leasing
+                   "CNS12", # Professional, Scientific, and Technical Services
+                   "CNS13", # Management of Companies and Enterprises
+                   "CNS14", # Admin & Support, Waste Mgmt & Remediation
+                   "CNS15", # Educational Services
+                   "CNS16", # Health Care and Social Assistance
+                   "CNS17", # Arts, Entertainment, and Recreation
+                   "CNS18", # Accommodation and Food Services
+                   "CNS19", # Other Services (excl. Public Admin)
+                   "CNS20"  # Public Administration
+)
+```
+
+
+```{r}
+industry_labels <- tribble(
+  ~industry_code, ~Industry Name ,
+  "C000", "Total Jobs",
+  "CNS01", "Agriculture, Forestry, Fishing and Hunting",
+  "CNS02", "Mining, Quarrying, and Oil and Gas Extraction",
+  "CNS03", "Utilities",
+  "CNS04", "Construction",
+  "CNS05", "Manufacturing",
+  "CNS06", "Wholesale Trade",
+  "CNS07", "Retail Trade",
+  "CNS08", "Transportation and Warehousing",
+  "CNS09", "Information",
+  "CNS10", "Finance and Insurance",
+  "CNS11", "Real Estate and Rental and Leasing",
+  "CNS12", "Professional, Scientific, and Technical Services",
+  "CNS13", "Management of Companies and Enterprises",
+  "CNS14", "Administrative and Support, Waste Management and Remediation",
+  "CNS15", "Educational Services",
+  "CNS16", "Health Care and Social Assistance",
+  "CNS17", "Arts, Entertainment, and Recreation",
+  "CNS18", "Accommodation and Food Services",
+  "CNS19", "Other Services (excluding Public Administration)",
+  "CNS20", "Public Administration"
+)
+
+```
+
+
+# Get the geographic boundaries of the state of Texas: State and Places
+
+```{r}
+options(tigris_use_cache = TRUE)
+
+tractstx <- tracts(state = "TX", year = 2020)
+placestx <- places(state = "TX", year = 2020)
+arlington <- placestx %>% filter(NAME == "Arlington")
+
+```
+
+
+# Keep only tracts whose centroids are inside Arlington
+
+```{r}
+tractcentroids <- st_centroid(tractstx)
+tractsarlington <- tractstx[st_within(tractcentroids, arlington, sparse = FALSE), ]
+arlingtontracts <- tractsarlington$GEOID
+
+```
+
+# Filter WAC in Arlington Tracts
+
+
+# Sum by year and over all tracts to get citywide total and
+
+```{r}
+# Sum across all tracts and years
+wac_arlington_df <- wac %>%
+  filter(w_tract %in% arlingtontracts) %>%
+  select(year, all_of(industryvars)) %>%
+  group_by(year) %>%
+  summarise(across(everything(), ~ sum(.x, na.rm = TRUE))) %>%
+  pivot_longer(cols = -year, names_to = "industry_code", values_to = "job_count") %>%
+  left_join(industry_labels, by = "industry_code") %>%
+  select(Industry Name, year, job_count) %>%
+  pivot_wider(names_from = year, values_from = job_count)
+```
+
+# Sort data Descending Order 
+```{r}
+wac_arlington_summary <- wac_arlington_df %>% arrange(desc(`2022`))
+```
+
+# 
+
+```{r}
+wac_arlington_change <- wac_arlington_summary %>%
+  mutate(
+    AbsoluteChange_2002_2012 = `2012` - `2002`,
+    PercentageChange_2002_2012 = round(100 * (`2012` - `2002`) / `2002`, 1),
+    AbsoluteChange_2002_2022 = `2022` - `2002`,
+    PercentageChange_2002_2022 = round(100 * (`2022` - `2002`) / `2002`, 1)
+  )
+
+```
+
+
+```{r}
+readr::write_csv(wac_arlington_change, "ArlingtonTexasLEHD_2002_2022.csv")
+```
+
+
+```{r}
+# tracts_jobs <- tractstx %>%
+#   filter(GEOID %in% arlingtontracts) %>%
+#   left_join(wac %>% select(w_tract, C000), by = c("GEOID" = "w_tract"))
+# 
+# ggplot() +
+#   geom_sf(data = tracts_jobs, aes(fill = C000), color = "white", size = 0.3) +
+#   geom_sf(data = arlington, fill = NA, color = "red", size = 1) +
+#   scale_fill_viridis_c(option = "plasma", trans = "log10", labels = comma) +
+#   labs(
+#     title = "Job Distribution in Arlington, TX (2020)",
+#     subtitle = "Total Jobs per Tract (LEHD WAC - JT00)",
+#     fill = "Total Jobs",
+#     caption = "Data: U.S. Census LEHD LODES (WAC), TIGER/Line (tracts)"
+#   ) +
+#   theme_minimal()
+```
+
