@@ -1,0 +1,181 @@
+
+# Load Packages 
+
+```{r}
+options(scipen=999)
+library(haven)
+library(dplyr)
+library(tidycensus)
+library(janitor)
+library(purrr)
+library(lehdr)
+library(sf)
+library(tigris)
+library(ggplot2)
+library(scales)
+library(stringr)
+library(tidyr)
+library(ipumsr)
+```
+
+# Get API Key using  this websit 
+```{r}
+# https://account.ipums.org/api_keys
+```
+
+# Set up API
+
+```{r}
+# set_ipums_api_key('59cba10d8a5da536fc06b59d5b72455daf0448469ffab047f57fecd7', save = TRUE)
+```
+
+# Get Time Series Data for Population 
+
+```{r}
+
+popTS <- define_extract_nhgis(description = "1790–2020 Total Population for Texas Counties",
+                              time_series_tables = tst_spec("A00", "county"))
+
+
+
+
+```
+
+
+
+```{r}
+popTS1 <- define_extract_nhgis(description = "1790–2020 Total Population for Texas Places",
+                              time_series_tables = tst_spec("AV0", "place"))
+
+```
+
+```{r}
+submit_extract(popTS)
+submit_extract(popTS1)
+```
+
+```{r}
+extracts <- get_extract_history("nhgis")
+extracts
+```
+
+```{r}
+popTS <- extracts[[2]]
+popTS1 <- extracts[[1]]
+```
+
+```{r}
+popTS
+popTS1
+```
+
+
+
+```{r}
+popTSDownload <- download_extract(popTS)
+popTSDownload1<- download_extract(popTS1)
+```
+## Download the data 
+
+```{r}
+popZIP <- read_nhgis(popTSDownload)
+popZIP1 <- read_nhgis(popTSDownload1)
+
+```
+
+## Filter for the County 
+
+```{r}
+countyfilter <- popZIP %>% filter(str_detect(COUNTY, regex("Tarrant", ignore_case = TRUE)) &     # Select County and State
+                                    str_detect(STATE, regex("Texas", ignore_case = TRUE)))
+
+countyfilter1 <- popZIP1  %>% filter(str_detect(PLACE, regex("Arlington city", ignore_case = TRUE))&    # Select Place and State
+                                    str_detect(STATE, regex("Texas", ignore_case = TRUE)))
+```
+
+
+```{r}
+names(countyfilter1)
+```
+
+# Rename columns and convert data to long 
+
+```{r}
+poplong <- countyfilter %>%
+  pivot_longer(
+    cols = starts_with("A00"),    # these are the total population columns
+    names_to = "column_code",
+    values_to = "total_population"
+  ) %>%
+  mutate(
+    year = str_extract(column_code, "\\d{4}"),      # get year from code
+    year = as.integer(year)
+  ) %>%
+  filter(year >= 1900) %>%                          # keep data from 1900 onward
+  select(state = STATE, county = COUNTY, year, total_population)
+
+
+
+poplong1 <- popZIP1 %>%
+  filter(str_detect(PLACE, regex("Arlington City", ignore_case = TRUE)) & str_detect(STATE, regex("Texas", ignore_case = TRUE))) %>%
+  pivot_longer(
+    cols = starts_with("AV0AA"),
+    names_to = "column_code",
+    values_to = "total_population"
+  ) %>%
+  mutate(
+    year = str_extract(column_code, "\\d{4}"),
+    year = as.integer(year)
+  ) %>%
+  filter(year >= 1900) %>%
+  select(state = STATE, place = PLACE, year, total_population)
+
+
+poplong2 <- popZIP1 %>%
+  filter(str_detect(PLACE, regex("Fort Worth city", ignore_case = TRUE)) & str_detect(STATE, regex("Texas", ignore_case = TRUE))) %>%
+  pivot_longer(
+    cols = starts_with("AV0AA"),
+    names_to = "column_code",
+    values_to = "total_population"
+  ) %>%
+  mutate(
+    year = str_extract(column_code, "\\d{4}"),
+    year = as.integer(year)
+  ) %>%
+  filter(year >= 1900) %>%
+  select(state = STATE, place = PLACE, year, total_population)
+
+
+```
+
+
+
+```{r}
+poplong
+poplong1
+poplong2
+```
+
+# Combine data for all cities
+
+```{r}
+
+combinedlong <- bind_rows(poplong, poplong1, poplong2)
+names(combinedlong)
+```
+
+```{r}
+combined_wide <- combinedlong %>%pivot_wider(id_cols = c(state, county, place),names_from = year,values_from = total_population)
+names(combined_wide)
+```
+
+
+
+```{r}
+readr::write_csv(combined_wide, "DecennialCensus1900_2020.csv")
+```
+
+
+
+
+
